@@ -1134,7 +1134,22 @@ func (r *PodReconciler) deleteDependencies(ctx context.Context, sourceUID string
 			r.Delete(ctx, &s)
 		}
 	}
+
+	// VolumeSnapshots (These are in the Source Namespace, so we search globally by UID)
+	// We need to be careful not to list ALL snapshots if we can avoid it, but with LabelSelector it is fine.
+	var snapshots snapshotv1.VolumeSnapshotList
+	if err := r.List(ctx, &snapshots, client.MatchingLabels{LabelSourcePodUID: sourceUID}); err == nil {
+		for _, snap := range snapshots.Items {
+			logger.Info("Deleting forensic snapshot", "snapshot", snap.Name, "namespace", snap.Namespace)
+			r.Delete(ctx, &snap)
+		}
+	} else {
+		// Log but don't fail, CRD might not exist
+		logger.V(1).Info("Could not list VolumeSnapshots for cleanup (CRD missing?)", "error", err)
+	}
 }
+
+// ... (existing helper methods) ...
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
