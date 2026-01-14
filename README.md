@@ -29,7 +29,7 @@ The **Kube Forensics Controller** is a Kubernetes Operator that automatically ca
 
 1.  **Create Cluster:** `kind create cluster`
 2.  **Build:** `make docker-build`
-3.  **Load:** `make kind-load IMG=controller:v0.1.0`
+3.  **Load:** `make kind-load IMG=controller:v0.2.0`
 4.  **Deploy:** `make deploy`
 5.  **Crash:** `kubectl apply -f example/crashing-pod.yaml`
 
@@ -41,7 +41,7 @@ To install the controller on any standard cluster using Helm:
 
 ```bash
 helm install forensics ./charts/kube-forensics-controller \
-  --set image.tag=v0.1.0 \
+  --set image.tag=v0.2.0 \
   --set config.enableSecretCloning=true
 ```
 
