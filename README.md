@@ -14,6 +14,20 @@ This is a Kubernetes controller that automatically creates forensic copies of cr
 - **Smart Deduplication**: Uses a hash of `(Namespace + Workload + Container)` to identify crash signatures and prevents "crash storms" via configurable rate limiting.
 - **Security Control**: Supports opting out of Secret cloning globally or per-pod for sensitive workloads.
 
+## Capabilities & Limitations
+
+**What this tool DOES capture:**
+*   ✅ **Configuration:** The exact Environment Variables, ConfigMaps, and Secrets mounted at the time of the crash.
+*   ✅ **Logs:** The standard output/error logs of the crashed container (preserved in a ConfigMap).
+*   ✅ **Networking Context:** The pod is placed in a network-isolated environment to test connectivity safely.
+
+**What this tool DOES NOT capture (yet):**
+*   ❌ **Filesystem Changes:** Files written to the container's writable layer (e.g., `/tmp`, `/var/run`) are **lost** when the original container dies. The forensic pod starts with a **fresh** filesystem from the image.
+*   ❌ **Memory (RAM):** The contents of RAM (variables, encryption keys in memory) are lost.
+*   ❌ **Process Tree:** The forensic pod runs `sleep infinity`, not the original process tree.
+
+*Note: Capturing filesystem and memory requires the Kubernetes Checkpoint API, which is on our [Roadmap](#future-roadmap).*
+
 ## Prerequisites
 
 - Go 1.25+

@@ -893,6 +893,19 @@ func (r *PodReconciler) createForensicPod(ctx context.Context, originalPod *core
 			Name:      toolsVolName,
 			MountPath: "/usr/local/bin/toolkit",
 		})
+		
+		// Security Hardening: Drop Dangerous Capabilities
+		if c.SecurityContext == nil {
+			c.SecurityContext = &corev1.SecurityContext{}
+		}
+		if c.SecurityContext.Capabilities == nil {
+			c.SecurityContext.Capabilities = &corev1.Capabilities{}
+		}
+		c.SecurityContext.Capabilities.Drop = append(c.SecurityContext.Capabilities.Drop, 
+			corev1.Capability("NET_ADMIN"), 
+			corev1.Capability("SYS_ADMIN"), 
+			corev1.Capability("SYS_PTRACE"),
+		)
 
 		// Update EnvFrom
 		for i, envFrom := range c.EnvFrom {
