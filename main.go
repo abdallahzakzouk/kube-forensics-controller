@@ -111,43 +111,47 @@ import (
 
 		var enableDatadogProfiling bool
 
-		var datadogServiceName string
+			var datadogServiceName string
 
-		var s3Bucket string
+			var s3Bucket string
 
-		var s3Region string
+			var s3Region string
 
-	
-
-		flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
-
-		flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-
-		flag.BoolVar(&enableLeaderElection, "leader-elect", false,
-
-			"Enable leader election for controller manager. "+
-
-				"Enabling this will ensure there is only one active controller manager.")
-
-		flag.StringVar(&targetNamespace, "target-namespace", "debug-forensics", "The namespace where forensic pods will be created.")
-
-		flag.StringVar(&forensicTTL, "forensic-ttl", "24h", "Time to live for forensic pods (e.g., 24h, 30m).")
-
-		flag.Int64Var(&maxLogSize, "max-log-size", 500*1024, "Maximum log size to capture in bytes.")
-
-		flag.StringVar(&ignoreNamespaces, "ignore-namespaces", "kube-system,kube-public", "Comma-separated list of namespaces to ignore.")
-
-		flag.StringVar(&watchNamespaces, "watch-namespaces", "", "Comma-separated list of namespaces to watch. If empty, watches all (except ignored).")
-
-		flag.BoolVar(&enableSecretCloning, "enable-secret-cloning", true, "Enable cloning of secrets to the forensic namespace. Security caution advised.")
-
-		flag.BoolVar(&enableCheckpointing, "enable-checkpointing", false, "Enable experimental Container Checkpointing (requires Kubelet feature gate).")
-
-		flag.StringVar(&rateLimitWindow, "rate-limit-window", "1h", "Window for deduplicating similar crashes (e.g., 1h, 10m).")
+			var collectorImage string
 
 		
 
-		// S3 Flags
+			flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
+
+			flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+
+			flag.BoolVar(&enableLeaderElection, "leader-elect", false,
+
+				"Enable leader election for controller manager. "+
+
+					"Enabling this will ensure there is only one active controller manager.")
+
+			flag.StringVar(&targetNamespace, "target-namespace", "debug-forensics", "The namespace where forensic pods will be created.")
+
+			flag.StringVar(&forensicTTL, "forensic-ttl", "24h", "Time to live for forensic pods (e.g., 24h, 30m).")
+
+			flag.Int64Var(&maxLogSize, "max-log-size", 500*1024, "Maximum log size to capture in bytes.")
+
+			flag.StringVar(&ignoreNamespaces, "ignore-namespaces", "kube-system,kube-public", "Comma-separated list of namespaces to ignore.")
+
+			flag.StringVar(&watchNamespaces, "watch-namespaces", "", "Comma-separated list of namespaces to watch. If empty, watches all (except ignored).")
+
+			flag.BoolVar(&enableSecretCloning, "enable-secret-cloning", true, "Enable cloning of secrets to the forensic namespace. Security caution advised.")
+
+			flag.BoolVar(&enableCheckpointing, "enable-checkpointing", false, "Enable experimental Container Checkpointing (requires Kubelet feature gate).")
+
+			flag.StringVar(&rateLimitWindow, "rate-limit-window", "1h", "Window for deduplicating similar crashes (e.g., 1h, 10m).")
+
+			flag.StringVar(&collectorImage, "collector-image", "abdallahzakzouk/kube-forensics-controller:v0.1.0", "Image to use for the collector job.")
+
+			
+
+			// S3 Flags
 
 		flag.StringVar(&s3Bucket, "s3-bucket", "", "S3 Bucket for exporting forensic artifacts (logs).")
 
@@ -399,43 +403,31 @@ import (
 
 	
 
-				RateLimitWindow:     rateLimitDuration,
+						RateLimitWindow:     rateLimitDuration,
 
 	
 
-				S3Bucket:            s3Bucket,
+						S3Bucket:            s3Bucket,
 
 	
 
-				S3Region:            s3Region,
+						S3Region:            s3Region,
 
 	
 
-				// For the collector job, we need the image of THIS controller.
+						Image:               collectorImage,
 
 	
 
-				// In a real deployment, we should downward-API this.
+					}
 
 	
 
-				// For now, we assume a flag or default.
+				
 
 	
 
-				Image: "abdallahzakzouk/kube-forensics-controller:v0.1.0", 
-
-	
-
-			}
-
-	
-
-		
-
-	
-
-			mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+					mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 
 	
 
