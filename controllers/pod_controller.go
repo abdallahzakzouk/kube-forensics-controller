@@ -23,6 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
 )
 
 const (
@@ -224,8 +226,18 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	logHash := sha256.Sum256([]byte(logs))
 	logHashStr := hex.EncodeToString(logHash[:])
 
-	// 10. Create Forensic Pod
-	if err := r.createForensicPod(ctx, &pod, resourceMap, logCMName, signature, crashedContainerName, exitCode, logHashStr); err != nil {
+	// 10. Snapshot PVCs (Feature: Robustness)
+	snapshotMap, err := r.snapshotPVCs(ctx, &pod)
+	if err != nil {
+		// Log error but continue (soft failure for snapshots)
+		logger.Error(err, "Failed to snapshot PVCs")
+		r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ForensicSnapshotFailed", "Failed to snapshot PVCs: %v", err)
+	} else if len(snapshotMap) > 0 {
+		r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ForensicSnapshotsCreated", "Created volume snapshots for %d PVCs", len(snapshotMap))
+	}
+
+	// 11. Create Forensic Pod
+	if err := r.createForensicPod(ctx, &pod, resourceMap, logCMName, signature, crashedContainerName, exitCode, logHashStr, snapshotMap); err != nil {
 		logger.Error(err, "Failed to create forensic pod")
 		ForensicPodCreationErrorsTotal.WithLabelValues(pod.Namespace, "CreateForensicPod").Inc()
 		return ctrl.Result{}, err
@@ -235,6 +247,44 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ForensicPodCreated", "Created forensic pod %s (LogHash: %s)", r.Config.TargetNamespace, logHashStr)
 	ForensicPodsCreatedTotal.WithLabelValues(pod.Namespace).Inc()
 	return ctrl.Result{}, nil
+}
+
+func (r *PodReconciler) snapshotPVCs(ctx context.Context, pod *corev1.Pod) (map[string]string, error) {
+	snapshotMap := make(map[string]string)
+	
+	for _, vol := range pod.Spec.Volumes {
+		if vol.PersistentVolumeClaim != nil {
+			pvcName := vol.PersistentVolumeClaim.ClaimName
+			
+			// Create Snapshot
+			snap := &snapshotv1.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: fmt.Sprintf("forensic-%s-%s-", pod.Name, vol.Name),
+					Namespace:    pod.Namespace, // Snapshots must be in PVC namespace
+					Labels: map[string]string{
+						LabelSourcePodUID: string(pod.UID),
+						LabelForensicTTL:  r.Config.ForensicTTL.String(),
+					},
+				},
+				Spec: snapshotv1.VolumeSnapshotSpec{
+					Source: snapshotv1.VolumeSnapshotSource{
+						PersistentVolumeClaimName: &pvcName,
+					},
+				},
+			}
+			
+			// Try to find if one already exists for this crash? 
+			// Deduplication logic handles the pod creation, but we might want to check here too.
+			// Relying on GenerateName implies unique snapshots per attempt.
+			
+			if err := r.Create(ctx, snap); err != nil {
+				// If CRD not found (cluster doesn't support snapshots), return error
+				return nil, err
+			}
+			snapshotMap[pvcName] = snap.Name
+		}
+	}
+	return snapshotMap, nil
 }
 
 func (r *PodReconciler) getCrashSignature(pod *corev1.Pod, containerName string, exitCode int32) string {
@@ -691,7 +741,7 @@ func (r *PodReconciler) cloneDependencies(ctx context.Context, pod *corev1.Pod) 
 
 }
 
-func (r *PodReconciler) createForensicPod(ctx context.Context, originalPod *corev1.Pod, resourceMap map[string]string, logCMName string, signature string, crashedContainerName string, exitCode int32, logHash string) error {
+func (r *PodReconciler) createForensicPod(ctx context.Context, originalPod *corev1.Pod, resourceMap map[string]string, logCMName string, signature string, crashedContainerName string, exitCode int32, logHash string, snapshotMap map[string]string) error {
 
 	// Truncate original pod name for label
 
@@ -703,12 +753,35 @@ func (r *PodReconciler) createForensicPod(ctx context.Context, originalPod *core
 
 	}
 
+
+
 	annotations := map[string]string{
 
-		"forensic.io/exit-code": fmt.Sprintf("%d", exitCode),
+		"forensic.io/exit-code":  fmt.Sprintf("%d", exitCode),
 
 		"forensic.io/log-sha256": logHash,
+
 	}
+
+	
+
+	// Add Snapshot Info
+
+	if len(snapshotMap) > 0 {
+
+		var parts []string
+
+		for pvc, snap := range snapshotMap {
+
+			parts = append(parts, fmt.Sprintf("%s:%s", pvc, snap))
+
+		}
+
+		annotations["forensic.io/snapshots"] = strings.Join(parts, ",")
+
+	}
+
+	
 
 	// Find original container to capture command/args
 
