@@ -13,12 +13,14 @@ Forensic evidence must be trusted.
 2.  **Stamping:** The hash is stored as an immutable annotation `forensic.io/log-sha256` on the forensic pod.
 3.  **Verification:** The `kubectl forensic export` command recalculates the hash of the downloaded logs and verifies it against the stamp.
 
-## 3. Volume Snapshots (Persistence)
+3.  **Volume Snapshots (Persistence)**
 If the crashed pod has Persistent Volume Claims (PVCs):
 1.  The controller identifies the PVCs.
 2.  It creates a `VolumeSnapshot` in the source namespace.
 3.  It annotates the forensic pod with the snapshot names (`forensic.io/snapshots`).
 *Requirement:* The cluster must support CSI Volume Snapshots and have a default `VolumeSnapshotClass`.
+
+**Next Steps (Roadmap):** Automated "Restore-and-Mount" logic to automatically attach these snapshots to the forensic pod.
 
 ## 4. Container Checkpointing (Experimental)
 *Requires: `ContainerCheckpoint` feature gate enabled on Kubelet.*
@@ -28,6 +30,8 @@ If enabled (`--enable-checkpointing=true`), the controller:
 2.  Calls the Kubelet API (`POST /checkpoint/...`).
 3.  The Kubelet dumps a `.tar` archive of the container memory and disk to `/var/lib/kubelet/checkpoints/` on the node.
 4.  The path is annotated on the forensic pod (`forensic.io/checkpoint`).
+
+**Next Steps (Roadmap):** Automated exfiltration of the `.tar` file to S3 via an ephemeral retriever pod.
 
 ## 5. S3 Log Export
 The controller can automatically upload captured logs to S3.

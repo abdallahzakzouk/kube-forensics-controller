@@ -142,15 +142,15 @@ All forensic pods are automatically restricted by a `default-deny` egress Networ
 ## Architectural Decisions & Roadmap
 
 ### Why Pod Cloning vs Ephemeral Containers?
-This project deliberately uses **Pod Cloning** instead of **Ephemeral Containers** for the following reasons:
-1.  **Post-Mortem Analysis:** Ephemeral containers require a *running* target pod. If a pod crashes and is deleted (or CrashLoops rapidly), you cannot attach to it. Cloning captures the state *before* it vanishes.
-2.  **Isolation:** Cloning moves the investigation to a quarantined namespace (`debug-forensics`), ensuring that heavy debugging commands do not impact the resource usage of the live production node or pod.
-3.  **Safety:** You can restart the application (via `sleep infinity` + manual exec) inside the clone to reproduce startup crashes without risking a restart of the actual production service.
+This project deliberately uses **Pod Cloning** instead of **Ephemeral Containers**. See [Security & Architecture](docs/security.md#architectural-decisions) for the full rationale.
 
 ### Future Roadmap
-*   **Memory Forensics:** Support for the Kubernetes `ContainerCheckpoint` API to capture RAM dumps (requires containerd/CRI-O node access).
-*   **External Storage:** Support for exporting artifacts to S3/GCS for long-term retention.
-*   **Fine-Grained RBAC:** Role-based installation for single-namespace scoping.
+While the controller is production-ready for configuration and log forensics, we are working on the following "Excellence" features:
+
+*   **Automated Checkpoint Exfiltration:** Automatically launching a retriever pod to move Kubelet checkpoints to S3. (See [Checkpointing Docs](docs/features.md#4-container-checkpointing-experimental))
+*   **Automated Snapshot Restore:** Automatically mounting Persistent Volume Snapshots into the forensic pod for instant disk inspection. (See [Snapshots Docs](docs/features.md#3-volume-snapshots-persistence))
+*   **Multi-Cloud Exporters:** Native support for Azure Blob Storage and Google Cloud Storage. (See [S3 Export Docs](docs/features.md#5-s3-log-export))
+*   **Fine-Grained RBAC:** A pre-configured "Namespaced" installation mode for restricted environments.
 
 ## Datadog Integration
 
