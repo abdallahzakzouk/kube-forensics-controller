@@ -23,19 +23,25 @@ import (
 
 	//+kubebuilder:scaffold:imports
 
-		snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
+			snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
 
-	
+		
 
-		"kube-forensics-controller/controllers"
+			"kube-forensics-controller/controllers"
 
-		"kube-forensics-controller/pkg/storage"
+			"kube-forensics-controller/pkg/checkpoint"
 
-	
+			"kube-forensics-controller/pkg/storage"
 
-		"strings"
+		
 
-		"time"
+			"k8s.io/client-go/kubernetes"
+
+		
+
+			"strings"
+
+			"time"
 
 	
 
@@ -301,73 +307,227 @@ import (
 
 	
 
-		config := controllers.ForensicsConfig{
-
-			TargetNamespace:     targetNamespace,
-
-			ForensicTTL:         ttlDuration,
-
-			MaxLogSizeBytes:     maxLogSize,
-
-			IgnoreNamespaces:    ignoreList,
-
-			WatchNamespaces:     watchList,
-
-			EnableSecretCloning: enableSecretCloning,
-
-			EnableCheckpointing: enableCheckpointing,
-
-			RateLimitWindow:     rateLimitDuration,
-
-		}
+			// Checkpoint Client
 
 	
 
-		mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-
-			Scheme:                 scheme,
-
-			Metrics:                metricsserver.Options{BindAddress: metricsAddr},
-
-			HealthProbeBindAddress: probeAddr,
-
-			LeaderElection:         enableLeaderElection,
-
-			LeaderElectionID:       "forensics.k8s.io",
-
-		})
-
-		if err != nil {
-
-			setupLog.Error(err, "unable to start manager")
-
-			os.Exit(1)
-
-		}
+			var checkpointClient *checkpoint.Client
 
 	
 
-		if err = (&controllers.PodReconciler{
+			if enableCheckpointing {
 
-			Client:     mgr.GetClient(),
+	
 
-			Scheme:     mgr.GetScheme(),
+				// We need a KubeClient for the checkpoint client (RESTClient)
 
-			KubeClient: nil, // Will be initialized in SetupWithManager
+	
 
-			Config:     config,
+				// The mgr.GetClient() is a high-level client. We need the low-level clientset.
 
-			Recorder:   mgr.GetEventRecorderFor("kube-forensics-controller"),
+	
 
-			Storage:    provider,
+				// We can create it from the config.
 
-		}).SetupWithManager(mgr); err != nil {
+	
 
-			setupLog.Error(err, "unable to create controller", "controller", "Pod")
+				conf := ctrl.GetConfigOrDie()
 
-			os.Exit(1)
+	
 
-		}
+				clientset, err := kubernetes.NewForConfig(conf)
+
+	
+
+				if err != nil {
+
+	
+
+					setupLog.Error(err, "unable to create kubernetes client")
+
+	
+
+					os.Exit(1)
+
+	
+
+				}
+
+	
+
+				checkpointClient = checkpoint.NewClient(clientset)
+
+	
+
+			}
+
+	
+
+		
+
+	
+
+			config := controllers.ForensicsConfig{
+
+	
+
+				TargetNamespace:     targetNamespace,
+
+	
+
+				ForensicTTL:         ttlDuration,
+
+	
+
+				MaxLogSizeBytes:     maxLogSize,
+
+	
+
+				IgnoreNamespaces:    ignoreList,
+
+	
+
+				WatchNamespaces:     watchList,
+
+	
+
+				EnableSecretCloning: enableSecretCloning,
+
+	
+
+				EnableCheckpointing: enableCheckpointing,
+
+	
+
+				RateLimitWindow:     rateLimitDuration,
+
+	
+
+				S3Bucket:            s3Bucket,
+
+	
+
+				S3Region:            s3Region,
+
+	
+
+				// For the collector job, we need the image of THIS controller.
+
+	
+
+				// In a real deployment, we should downward-API this.
+
+	
+
+				// For now, we assume a flag or default.
+
+	
+
+				Image: "abdallahzakzouk/kube-forensics-controller:v0.1.0", 
+
+	
+
+			}
+
+	
+
+		
+
+	
+
+			mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+
+	
+
+				Scheme:                 scheme,
+
+	
+
+				Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+
+	
+
+				HealthProbeBindAddress: probeAddr,
+
+	
+
+				LeaderElection:         enableLeaderElection,
+
+	
+
+				LeaderElectionID:       "forensics.k8s.io",
+
+	
+
+			})
+
+	
+
+			if err != nil {
+
+	
+
+				setupLog.Error(err, "unable to start manager")
+
+	
+
+				os.Exit(1)
+
+	
+
+			}
+
+	
+
+		
+
+	
+
+			if err = (&controllers.PodReconciler{
+
+	
+
+				Client:           mgr.GetClient(),
+
+	
+
+				Scheme:           mgr.GetScheme(),
+
+	
+
+				KubeClient:       kubernetes.NewForConfigOrDie(ctrl.GetConfigOrDie()), // Initialize KubeClient here or reuse above
+
+	
+
+				Config:           config,
+
+	
+
+				Recorder:         mgr.GetEventRecorderFor("kube-forensics-controller"),
+
+	
+
+				Storage:          provider,
+
+	
+
+				CheckpointClient: checkpointClient,
+
+	
+
+			}).SetupWithManager(mgr); err != nil {
+
+	
+
+				setupLog.Error(err, "unable to create controller", "controller", "Pod")
+
+	
+
+				os.Exit(1)
+
+	
+
+			}
 
 		//+kubebuilder:scaffold:builder
 
