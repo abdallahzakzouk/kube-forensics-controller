@@ -25,7 +25,7 @@ make docker-build
 ### 3. Load Image into Kind
 Kind nodes cannot pull local docker images by default. You must load it:
 ```bash
-make kind-load IMG=controller:v0.2.0
+make kind-load IMG=controller:v0.2.2
 ```
 
 ### 4. Deploy the Controller

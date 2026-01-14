@@ -15,8 +15,8 @@ We provide a Helm chart for easy installation and configuration.
 Ensure the controller image is available in a registry your cluster can pull from (e.g., GHCR, Docker Hub, ECR).
 *   If building from source:
     ```bash
-    docker build -t my-registry/kube-forensics-controller:v0.2.0 .
-    docker push my-registry/kube-forensics-controller:v0.2.0
+    docker build -t my-registry/kube-forensics-controller:v0.2.2 .
+    docker push my-registry/kube-forensics-controller:v0.2.2
     ```
 
 ### 2. Install the Chart
@@ -28,7 +28,7 @@ cd kube-forensics-controller
 
 helm install forensics ./charts/kube-forensics-controller \
   --set image.repository=my-registry/kube-forensics-controller \
-  --set image.tag=v0.2.0 \
+  --set image.tag=v0.2.2 \
   --set config.targetNamespace=debug-forensics
 ```
 

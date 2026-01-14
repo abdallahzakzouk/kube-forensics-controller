@@ -127,7 +127,7 @@ func main() {
 
 	flag.StringVar(&rateLimitWindow, "rate-limit-window", "1h", "Window for deduplicating similar crashes (e.g., 1h, 10m).")
 
-	flag.StringVar(&collectorImage, "collector-image", "abdallahzakzouk/kube-forensics-controller:v0.2.0", "Image to use for the collector job.")
+	flag.StringVar(&collectorImage, "collector-image", "amzacdocker/kube-forensics-controller:v0.2.2", "Image to use for the collector job.")
 
 	// S3 Flags
 
