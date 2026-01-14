@@ -30,14 +30,15 @@ This is a Kubernetes controller that automatically creates forensic copies of cr
 
 ## Prerequisites
 
-- Go 1.25+
-- Docker
-- Kubernetes Cluster (Kind, Minikube, or remote)
-- kubectl
+- **Kubernetes Cluster** (v1.25+) - EKS, GKE, AKS, Kind, Minikube, etc.
+- **kubectl** installed and configured.
+- **Helm** (optional, for Chart installation).
 
-## Quick Start (Kind)
+## Quick Start (Local Development with Kind)
 
-**Prerequisites:** Kind, Docker, kubectl, Helm (optional).
+This guide assumes you want to try the controller locally using **Kind** (Kubernetes in Docker).
+
+**Requirements for Quick Start:** Kind, Docker.
 
 1. **Create a Kind cluster** (if you don't have one):
    ```bash
@@ -64,20 +65,23 @@ This is a Kubernetes controller that automatically creates forensic copies of cr
    kubectl get pods -l control-plane=controller-manager
    ```
 
-## Installation via Helm
+## Installation via Helm (Production)
 
-You can also install the controller using the provided Helm chart:
+To install the controller on any standard cluster (EKS, GKE, etc.):
 
 ```bash
-# Build and Load image first (if running locally)
-make docker-build
-make kind-load IMG=abdallahzakzouk/kube-forensics-controller:v0.1.0
+# 1. Add repo (if hosted) or clone
+git clone https://github.com/abdallahzakzouk/kube-forensics-controller.git
+cd kube-forensics-controller
 
-# Install Chart
+# 2. Install Chart
 helm install forensics ./charts/kube-forensics-controller \
+  --set image.repository=ghcr.io/abdallahzakzouk/kube-forensics-controller \
   --set image.tag=v0.1.0 \
   --set config.enableSecretCloning=true
 ```
+
+*(Note: You will need to build and push the image to a registry accessible by your cluster, or use the pre-built image if available).*
 
 ## Kubectl Plugin
 
