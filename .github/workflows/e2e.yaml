@@ -1,0 +1,61 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Install Kind
+      uses: helm/kind-action@v1.8.0
+      with:
+        cluster_name: forensics-e2e
+
+    - name: Build and Load Image
+      run: |
+        docker build -t controller:e2e .
+        kind load docker-image controller:e2e --name forensics-e2e
+
+    - name: Deploy and Test
+      run: |
+        # We assume hack/e2e-test.sh handles the rest, but we need to tweak it slightly for CI 
+        # where Kind cluster is already created by the action.
+        # Or we just run the steps manually here to be explicit.
+        
+        # Deploy RBAC
+        kubectl apply -f config/rbac/rbac.yaml
+        
+        # Deploy Manager (modified image)
+        sed "s|image: controller:.*|image: controller:e2e|g" deploy/manager.yaml > deploy/manager-e2e.yaml
+        sed -i "s|imagePullPolicy: IfNotPresent|imagePullPolicy: Never|g" deploy/manager-e2e.yaml
+        kubectl apply -f deploy/manager-e2e.yaml
+        
+        # Wait for Ready
+        kubectl wait --for=condition=available --timeout=120s deployment/kube-forensics-controller -n default
+        
+        # Run Sample
+        kubectl apply -f example/crashing-pod.yaml
+        
+        # Wait
+        sleep 30
+        
+        # Verify
+        if kubectl get pods -n debug-forensics -l forensic-source-pod=crash-app | grep -q "Running"; then
+          echo "✅ Forensic Pod Detected"
+        else
+          echo "❌ Test Failed"
+          kubectl get pods -A
+          kubectl logs -n default -l control-plane=controller-manager
+          exit 1
+        fi

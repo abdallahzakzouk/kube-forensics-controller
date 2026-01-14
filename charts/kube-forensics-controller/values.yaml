@@ -1,0 +1,27 @@
+image:
+  repository: abdallahzakzouk/kube-forensics-controller
+  pullPolicy: IfNotPresent
+  tag: "v0.1.0"
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 64Mi
+
+config:
+  targetNamespace: debug-forensics
+  forensicTTL: "24h"
+  maxLogSize: 512000
+  ignoreNamespaces: "kube-system,kube-public"
+  enableSecretCloning: true
+  enableCheckpointing: false
+  s3:
+    bucket: ""
+    region: "us-east-1"
+
+serviceAccount:
+  create: true
+  name: "kube-forensics-controller"

@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kube-forensics-controller.fullname" . }}
+  labels:
+    {{- include "kube-forensics-controller.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kube-forensics-controller.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kube-forensics-controller.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: manager
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /manager
+          args:
+            - --leader-elect
+            - --target-namespace={{ .Values.config.targetNamespace }}
+            - --forensic-ttl={{ .Values.config.forensicTTL }}
+            - --max-log-size={{ .Values.config.maxLogSize }}
+            - --ignore-namespaces={{ .Values.config.ignoreNamespaces }}
+            - --enable-secret-cloning={{ .Values.config.enableSecretCloning }}
+            - --enable-checkpointing={{ .Values.config.enableCheckpointing }}
+            {{- if .Values.config.s3.bucket }}
+            - --s3-bucket={{ .Values.config.s3.bucket }}
+            - --s3-region={{ .Values.config.s3.region }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
