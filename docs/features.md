@@ -1,5 +1,22 @@
 # Features Deep Dive
 
+This document provides a detailed look at the core features of the Kube Forensics Controller, their implementation, and their limitations.
+
+## Capabilities & Limitations
+
+**What this tool DOES capture:**
+*   ✅ **Configuration:** The exact Environment Variables, ConfigMaps, and Secrets mounted at the time of the crash.
+*   ✅ **Logs:** The standard output/error logs of the crashed container (preserved in a ConfigMap and optionally exported to S3).
+*   ✅ **Networking Context:** The pod is placed in a network-isolated environment to test connectivity safely.
+*   ✅ **PVC Data:** Triggers [Volume Snapshots](#3-volume-snapshots-persistence) for Persistent Volume Claims.
+
+**What this tool DOES NOT capture (by default):**
+*   ❌ **Filesystem Changes:** Files written to the container's writable layer (e.g., `/tmp`, `/var/run`) are **lost** when the original container dies. The forensic pod starts with a **fresh** filesystem from the image.
+*   ❌ **Memory (RAM):** The contents of RAM (variables, encryption keys in memory) are lost.
+*   ❌ **Process Tree:** The forensic pod runs `sleep infinity`, not the original process tree.
+
+*Note: Capturing filesystem and memory requires the [Container Checkpointing](#4-container-checkpointing-experimental) feature, which is currently experimental.*
+
 ## 1. Smart Deduplication (Rate Limiting)
 To prevent "Crash Storms" (where a broken deployment spawns 100s of forensic pods), the controller implements smart deduplication.
 
