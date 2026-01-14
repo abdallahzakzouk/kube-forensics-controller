@@ -16,6 +16,7 @@ If using Helm, these maps to `config.*` values in `values.yaml`.
 | `--rate-limit-window` | `1h` | Window for deduplicating similar crashes. Only one forensic pod per unique crash signature is created in this window. |
 | `--enable-secret-cloning` | `true` | Enable/Disable cloning of secrets. If `false`, secrets are redacted. |
 | `--enable-checkpointing` | `false` | Enable experimental Container Checkpointing (requires Kubelet feature gate). |
+| `--collector-image` | `...:v0.1.0` | Image used for the forensic collector job (defaults to controller image). |
 | `--s3-bucket` | `""` | S3 Bucket name for exporting forensic artifacts (logs). |
 | `--s3-region` | `us-east-1` | AWS Region for S3. |
 | `--enable-datadog-profiling` | `false` | Enable Datadog Continuous Profiling (requires `DD_AGENT_HOST` env var). |

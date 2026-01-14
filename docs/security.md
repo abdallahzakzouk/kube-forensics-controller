@@ -23,6 +23,13 @@ The controller creates a **Default Deny Egress** NetworkPolicy in the `debug-for
 ### 4. Capability Dropping
 The controller explicitly drops dangerous capabilities (`NET_ADMIN`, `SYS_ADMIN`, `SYS_PTRACE`) from the forensic pod spec.
 
+### 5. Collector Job Security (Checkpointing)
+**Note:** Enabling `--enable-checkpointing` introduces higher privileges.
+To exfiltrate checkpoint archives, the controller launches a temporary **Collector Job**.
+*   **Privilege:** This job runs as **root** with `privileged: true` to access the node's filesystem.
+*   **HostPath:** It mounts `/var/lib/kubelet/checkpoints` (read-only for the directory, specific file access).
+*   **Mitigation:** The job is short-lived (TTL 5 mins), pinned to a specific node, and runs only when a crash is detected.
+
 ## Architectural Decisions
 
 ### Pod Cloning vs. Ephemeral Containers

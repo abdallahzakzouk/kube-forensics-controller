@@ -48,7 +48,13 @@ If enabled (`--enable-checkpointing=true`), the controller:
 3.  The Kubelet dumps a `.tar` archive of the container memory and disk to `/var/lib/kubelet/checkpoints/` on the node.
 4.  The path is annotated on the forensic pod (`forensic.io/checkpoint`).
 
-**Next Steps (Roadmap):** Automated exfiltration of the `.tar` file to S3 via an ephemeral retriever pod.
+**Exfiltration Workflow:**
+If an S3 Bucket is configured, the controller automatically:
+1.  Launches a privileged **Collector Job** pinned to the specific node.
+2.  Mounts the checkpoint file.
+3.  Calculates the **SHA256 Hash**.
+4.  Uploads both the artifact (`checkpoint.tar`) and the hash (`.sha256`) to S3.
+5.  Cleans up the file from the node to prevent disk exhaustion.
 
 ## 5. S3 Log Export
 The controller can automatically upload captured logs to S3.
