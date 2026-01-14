@@ -33,3 +33,15 @@ If enabled (`--enable-checkpointing=true`), the controller:
 The controller can automatically upload captured logs to S3.
 *   **Path:** `s3://<bucket>/<namespace>/<pod>/<timestamp>/crash.log`
 *   **Auth:** Uses standard AWS SDK chain (IRSA / Env Vars / Instance Profile).
+
+## 6. Observability Metrics
+The controller exposes Prometheus-format metrics on port `8080` at `/metrics`.
+
+| Metric Name | Type | Description | Labels |
+|-------------|------|-------------|--------|
+| `forensics_crashes_total` | Counter | Total number of crashes detected. | `namespace`, `reason` |
+| `forensics_pods_created_total` | Counter | Number of forensic pods successfully created. | `source_namespace` |
+| `forensics_pod_creation_errors_total` | Counter | Number of errors during creation workflow. | `source_namespace`, `step` |
+
+**Datadog Users:** These metrics are compatible with the Datadog OpenMetrics integration.
+
