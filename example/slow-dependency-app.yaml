@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: slow-dependency-app
+  namespace: default
+  labels:
+    app: slow-starter
+    scenario: "race-condition"
+spec:
+  restartPolicy: Always
+  containers:
+  - name: app
+    image: busybox
+    # Simulates an app that crashes because a dependency (file) isn't ready yet.
+    # But the dependency takes time to appear (simulated by restart count or time).
+    # Since we can't easily persist state without PVC, we rely on the fact that
+    # the Forensic Pod allows us to manually test 'check-dependency' vs 'start-app' timing.
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      echo "Checking for config file..."
+      # In a real scenario, this might be a network calls that fails the first few times.
+      # Here we just randomly fail to simulate "not ready".
+      if [ $((RANDOM % 3)) -ne 0 ]; then
+        echo "Error: Config service unreachable (Connection Refused)"
+        exit 1
+      fi
+      echo "Config loaded. Application Started."
+      sleep infinity
+---
+# Forensic Value:
+# 1. The live pod eventually succeeds (after a few CrashLoopBackOffs).
+# 2. You want to debug *why* it is slow to start.
+# 3. Enter the Forensic Pod. It is effectively an "Sandbox" of the exact failed environment.
+# 4. You can manually run the start command and verify: "Oh, it fails 66% of the time! We need a retry loop."
+# 5. Doing this in the live pod is impossible because it is already running (and you can't re-run the entrypoint easily without crashing it).

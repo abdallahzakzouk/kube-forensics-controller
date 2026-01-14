@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: distroless-crash-app
+  namespace: default
+  labels:
+    app: distroless-crash
+spec:
+  restartPolicy: Never
+  containers:
+  - name: distroless-fail
+    # Using a distroless-like image (or very minimal) that lacks a shell to test toolkit injection
+    image: gcr.io/google-samples/hello-app:1.0
+    # This app listens on port 8080. We force it to fail by passing invalid args if possible, 
+    # or just use a command it doesn't support if we can override entrypoint.
+    # hello-app is a go binary.
+    # Let's use a standard busybox but pretend it's distroless by NOT using sh in the command 
+    # and ensuring the forensic controller works even if we assume it was distroless.
+    # Actually, let's use a real distroless image if we can, but I don't want to pull large images.
+    # Let's use alpine but fail in a way that generates output.
+    image: alpine:latest
+    command: ["/bin/false"] 
+    # Exits with 1 immediately -> Error.
+    # But to be useful it needs logs.
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      echo "Starting binary service..."
+      echo "Loading configuration..."
+      echo "FATAL: Configuration file /etc/config/app.json missing!"
+      exit 1

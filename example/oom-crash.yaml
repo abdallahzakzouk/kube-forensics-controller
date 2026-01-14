@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: oom-crash-app
+  namespace: default
+  labels:
+    app: oom-crash
+spec:
+  restartPolicy: Never
+  containers:
+  - name: memory-leaker
+    image: python:3.9-slim
+    command: ["python", "-c"]
+    args:
+    - |
+      import time
+      print("Starting memory leak simulation...")
+      data = []
+      # Leak 10MB every 0.1s
+      block = " " * 1024 * 1024 * 10
+      while True:
+          data.append(block)
+          print(f"Allocated {len(data) * 10} MB")
+          time.sleep(0.1)
+    resources:
+      limits:
+        memory: "100Mi"
+      requests:
+        memory: "50Mi"

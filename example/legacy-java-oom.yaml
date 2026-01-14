@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: legacy-java-oom
+  namespace: default
+  labels:
+    app: legacy-monolith
+    scenario: "jvm-heap-analysis"
+spec:
+  restartPolicy: Never
+  containers:
+  - name: java-app
+    image: openjdk:11-jre-slim
+    command: ["java", "-Xmx512m", "-jar", "app.jar"]
+    # We simulate a crash by just exiting, but implying an OOM
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      echo "Initializing Legacy Framework..."
+      echo "Loading 500,000 cached objects..."
+      sleep 2
+      echo "java.lang.OutOfMemoryError: Java heap space"
+      echo "Dumping heap to /var/dumps/heap.hprof"
+      # Simulate writing a dump file (which would be lost if not persistent)
+      # NOTE: In a real scenario, you'd need a PVC to persist this dump for the forensic pod to see it,
+      # OR the forensic controller logs capture the stdout stacktrace which is valuable.
+      echo "Terminating..."
+      exit 137
+    resources:
+      limits:
+        memory: "600Mi"
+---
+# Forensic Value:
+# 1. Captures the stdout stacktrace in the forensic logs ConfigMap.
+# 2. Allows you to start the pod with a debugger agent attached (by editing the forensic pod manually or using the shell) 
+#    or run 'jmap' (if installed or via toolkit) against a reproduced process to analyze memory usage patterns.

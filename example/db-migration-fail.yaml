@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: db-migration-fail
+  namespace: default
+  labels:
+    app: migration-job
+    scenario: "manual-reproduction"
+spec:
+  restartPolicy: Never
+  containers:
+  - name: migrator
+    image: postgres:15-alpine
+    # Simulates a migration script that fails due to network or bad SQL
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      echo "Starting Schema Migration v1.2..."
+      echo "Connecting to DB host: prod-db.internal..."
+      sleep 2
+      echo "Error: Connection timed out after 2000ms"
+      echo "Fatal: Could not apply migration 004_users_table.sql"
+      exit 1
+    env:
+    - name: PGHOST
+      value: "prod-db.internal"
+    - name: PGUSER
+      value: "admin"
+---
+# Forensic Value:
+# 1. The original pod dies immediately, giving you no time to troubleshoot network.
+# 2. The Forensic Pod stays alive (sleep infinity).
+# 3. You can 'exec' in and run 'psql' or 'nc -vz prod-db.internal 5432' to debug the connectivity issue manually using the EXACT same environment variables.

@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: exception-crash-app
+  namespace: default
+  labels:
+    app: exception-crash
+spec:
+  restartPolicy: Never
+  containers:
+  - name: buggy-app
+    image: node:18-alpine
+    command: ["node", "-e"]
+    args:
+    - |
+      console.log("Application started.");
+      console.log("Initializing database connection...");
+      setTimeout(() => {
+        console.log("Connection established.");
+        console.log("Processing request #1234");
+        // Simulate a bug
+        console.error("CRITICAL: Unhandled Exception in request processing");
+        throw new Error("ReferenceError: user_id is not defined at /src/app.js:42");
+      }, 3000);

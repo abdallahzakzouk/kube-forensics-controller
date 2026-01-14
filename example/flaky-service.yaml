@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: flaky-service
+  namespace: default
+  labels:
+    app: flaky
+    scenario: "intermittent-failure"
+spec:
+  restartPolicy: Always
+  containers:
+  - name: server
+    image: busybox
+    # 50% chance of failure on startup
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      if [ $((RANDOM % 2)) -eq 0 ]; then
+        echo "CRITICAL: Random startup entropy failure!"
+        exit 1
+      fi
+      echo "Startup successful. Serving traffic..."
+      sleep infinity
+---
+# Forensic Value:
+# 1. This pod has 'RestartPolicy: Always'.
+# 2. Eventually, it will start successfully and be in 'Running' state.
+# 3. But you will see 'Restarts: X' in kubectl.
+# 4. Why did it fail? The logs of previous containers might be rotated.
+# 5. The Forensic Controller detects the crash (even if it heals later) and creates a forensic pod.
+# 6. You can use the forensic pod to run the startup script repeatedly to verify the 50% failure rate without touching the live production pod.
