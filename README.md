@@ -37,6 +37,8 @@ This is a Kubernetes controller that automatically creates forensic copies of cr
 
 ## Quick Start (Kind)
 
+**Prerequisites:** Kind, Docker, kubectl, Helm (optional).
+
 1. **Create a Kind cluster** (if you don't have one):
    ```bash
    kind create cluster
@@ -61,6 +63,21 @@ This is a Kubernetes controller that automatically creates forensic copies of cr
    ```bash
    kubectl get pods -l control-plane=controller-manager
    ```
+
+## Installation via Helm
+
+You can also install the controller using the provided Helm chart:
+
+```bash
+# Build and Load image first (if running locally)
+make docker-build
+make kind-load IMG=abdallahzakzouk/kube-forensics-controller:v0.1.0
+
+# Install Chart
+helm install forensics ./charts/kube-forensics-controller \
+  --set image.tag=v0.1.0 \
+  --set config.enableSecretCloning=true
+```
 
 ## Kubectl Plugin
 
