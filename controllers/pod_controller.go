@@ -24,483 +24,419 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-			snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
+	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
 
-			"kube-forensics-controller/pkg/checkpoint"
+	"kube-forensics-controller/pkg/checkpoint"
 
-			"kube-forensics-controller/pkg/collector"
+	"kube-forensics-controller/pkg/collector"
 
-			"kube-forensics-controller/pkg/storage"
+	"kube-forensics-controller/pkg/storage"
+)
 
-		)
+const (
+	LabelSourcePod = "forensic-source-pod"
 
-		
+	LabelSourcePodUID = "forensic-source-pod-uid"
 
-		const (
+	LabelForensicTime = "forensic-time"
 
-			LabelSourcePod          = "forensic-source-pod"
+	LabelForensicTTL = "forensic.io/ttl"
 
-			LabelSourcePodUID       = "forensic-source-pod-uid"
+	LabelCrashSignature = "forensic.io/crash-signature"
 
-			LabelForensicTime       = "forensic-time"
+	AnnotationNoSecretClone = "forensic.io/no-secret-clone"
 
-			LabelForensicTTL        = "forensic.io/ttl"
+	AnnotationForensicHold = "forensic.io/hold"
 
-			LabelCrashSignature     = "forensic.io/crash-signature"
+	LabelLogS3URL = "forensic.io/log-s3-url"
 
-			AnnotationNoSecretClone = "forensic.io/no-secret-clone"
+	ForensicTimeFormat = "2006-01-02T15-04-05Z"
 
-			AnnotationForensicHold  = "forensic.io/hold"
+	NetworkPolicyName = "deny-all-egress"
 
-			LabelLogS3URL           = "forensic.io/log-s3-url"
+	LogConfigMapKey = "crash.log"
+)
 
-			ForensicTimeFormat      = "2006-01-02T15-04-05Z"
+type ForensicsConfig struct {
+	TargetNamespace string
 
-			NetworkPolicyName       = "deny-all-egress"
+	ForensicTTL time.Duration
 
-			LogConfigMapKey         = "crash.log"
+	MaxLogSizeBytes int64
 
-		)
+	IgnoreNamespaces []string
 
-		
+	WatchNamespaces []string
 
-		type ForensicsConfig struct {
+	EnableSecretCloning bool
 
-			TargetNamespace     string
+	EnableCheckpointing bool
 
-			ForensicTTL         time.Duration
+	RateLimitWindow time.Duration
 
-			MaxLogSizeBytes     int64
+	S3Bucket string
 
-			IgnoreNamespaces    []string
+	S3Region string
 
-			WatchNamespaces     []string
+	Image string // Controller image for collector job
 
-			EnableSecretCloning bool
+}
 
-			EnableCheckpointing bool
+// PodReconciler reconciles a Pod object
 
-			RateLimitWindow     time.Duration
+type PodReconciler struct {
+	client.Client
 
-			S3Bucket            string
+	Scheme *runtime.Scheme
 
-			S3Region            string
+	KubeClient kubernetes.Interface
 
-			Image               string // Controller image for collector job
+	Config ForensicsConfig
+
+	Recorder record.EventRecorder
+
+	Storage storage.Provider
+
+	CheckpointClient *checkpoint.Client
+}
+
+//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
+
+//+kubebuilder:rbac:groups="",resources=pods/status,verbs=get;update;patch
+
+//+kubebuilder:rbac:groups="",resources=pods/log,verbs=get
+
+//+kubebuilder:rbac:groups="",resources=configmaps;secrets,verbs=get;list;watch;create;update;patch;delete
+
+//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
+
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
+
+//+kubebuilder:rbac:groups="",resources=nodes/proxy,verbs=get;create
+
+//+kubebuilder:rbac:groups="batch",resources=jobs,verbs=get;list;watch;create;delete
+
+func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
+	logger := log.FromContext(ctx)
+
+	// ... (Existing Checks 0, 0.1, 1, 2, 3) ...
+
+	// 0. Check Watch Namespaces (Allow-list)
+
+	if len(r.Config.WatchNamespaces) > 0 {
+
+		allowed := false
+
+		for _, ns := range r.Config.WatchNamespaces {
+
+			if req.Namespace == ns {
+
+				allowed = true
+
+				break
+
+			}
 
 		}
 
-		
-
-		// PodReconciler reconciles a Pod object
-
-		type PodReconciler struct {
-
-			client.Client
-
-			Scheme           *runtime.Scheme
-
-			KubeClient       kubernetes.Interface
-
-			Config           ForensicsConfig
-
-			Recorder         record.EventRecorder
-
-			Storage          storage.Provider
-
-			CheckpointClient *checkpoint.Client
-
-		}
-
-		
-
-		//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
-
-		//+kubebuilder:rbac:groups="",resources=pods/status,verbs=get;update;patch
-
-		//+kubebuilder:rbac:groups="",resources=pods/log,verbs=get
-
-		//+kubebuilder:rbac:groups="",resources=configmaps;secrets,verbs=get;list;watch;create;update;patch;delete
-
-		//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
-
-		//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
-
-		//+kubebuilder:rbac:groups="",resources=nodes/proxy,verbs=get;create
-
-		//+kubebuilder:rbac:groups="batch",resources=jobs,verbs=get;list;watch;create;delete
-
-		
-
-		func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-
-			logger := log.FromContext(ctx)
-
-		
-
-			// ... (Existing Checks 0, 0.1, 1, 2, 3) ...
-
-			// 0. Check Watch Namespaces (Allow-list)
-
-			if len(r.Config.WatchNamespaces) > 0 {
-
-				allowed := false
-
-				for _, ns := range r.Config.WatchNamespaces {
-
-					if req.Namespace == ns {
-
-						allowed = true
-
-						break
-
-					}
-
-				}
-
-				if !allowed {
-
-					return ctrl.Result{}, nil
-
-				}
-
-			}
-
-		
-
-			// 0.1 Check Ignore List
-
-			for _, ns := range r.Config.IgnoreNamespaces {
-
-				if req.Namespace == ns {
-
-					return ctrl.Result{}, nil
-
-				}
-
-			}
-
-			if req.Namespace == r.Config.TargetNamespace {
-
-				return ctrl.Result{}, nil
-
-			}
-
-		
-
-			// 1. Fetch the Pod
-
-			var pod corev1.Pod
-
-			if err := r.Get(ctx, req.NamespacedName, &pod); err != nil {
-
-				return ctrl.Result{}, client.IgnoreNotFound(err)
-
-			}
-
-		
-
-			// 2. Ignore if deleted
-
-			if !pod.DeletionTimestamp.IsZero() {
-
-				return ctrl.Result{}, nil
-
-			}
-
-		
-
-			// 3. Check Crash Criteria
-
-			isCrash := false
-
-			crashedContainerName := ""
-
-			var exitCode int32 = 0
-
-			
-
-			checkStatus := func(name string, state corev1.ContainerState, lastState corev1.ContainerState) bool {
-
-				if state.Terminated != nil {
-
-					reason := state.Terminated.Reason
-
-					if reason == "Error" || reason == "OOMKilled" || state.Terminated.ExitCode != 0 {
-
-						crashedContainerName = name
-
-						exitCode = state.Terminated.ExitCode
-
-						return true
-
-					}
-
-				}
-
-				if lastState.Terminated != nil {
-
-					reason := lastState.Terminated.Reason
-
-					if reason == "Error" || reason == "OOMKilled" || lastState.Terminated.ExitCode != 0 {
-
-						crashedContainerName = name
-
-						exitCode = lastState.Terminated.ExitCode
-
-						return true
-
-					}
-
-				}
-
-				return false
-
-			}
-
-		
-
-			allStatuses := append(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses...)
-
-			for _, status := range allStatuses {
-
-				if checkStatus(status.Name, status.State, status.LastTerminationState) {
-
-					isCrash = true
-
-					break
-
-				}
-
-			}
-
-			
-
-			if !isCrash && pod.Status.Phase == corev1.PodFailed {
-
-				isCrash = true
-
-				if len(pod.Spec.Containers) > 0 {
-
-					crashedContainerName = pod.Spec.Containers[0].Name
-
-					exitCode = 1
-
-				}
-
-			}
-
-		
-
-			if !isCrash {
-
-				return ctrl.Result{}, nil
-
-			}
-
-		
-
-			logger.Info("Detected crashed pod", "pod", req.NamespacedName, "phase", pod.Status.Phase)
-
-			ForensicCrashesTotal.WithLabelValues(pod.Namespace, "CrashDetected").Inc()
-
-		
-
-			// 4. Deduplication
-
-			signature := r.getCrashSignature(&pod, crashedContainerName, exitCode)
-
-			var forensicPods corev1.PodList
-
-			if err := r.List(ctx, &forensicPods, client.InNamespace(r.Config.TargetNamespace), client.MatchingLabels{LabelCrashSignature: signature} ); err != nil {
-
-				return ctrl.Result{}, err
-
-			}
-
-			now := time.Now()
-
-			for _, fp := range forensicPods.Items {
-
-				age := now.Sub(fp.CreationTimestamp.Time)
-
-				if age < r.Config.RateLimitWindow {
-
-					logger.Info("Skipping forensic creation (rate limited)", "original_pod", req.NamespacedName)
-
-					return ctrl.Result{}, nil
-
-				}
-
-			}
-
-		
-
-			r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ForensicAnalysisStarted", "Crash detected in container %s. Creating forensic pod.", crashedContainerName)
-
-		
-
-			// ... (5, 6: Namespace & Network Policy) ...
-
-			if err := r.ensureNamespace(ctx); err != nil { return ctrl.Result{}, err }
-
-			if err := r.ensureNetworkPolicy(ctx); err != nil { return ctrl.Result{}, err }
-
-		
-
-			// 7. Logs
-
-			logs, _ := r.getPodLogs(ctx, &pod, crashedContainerName)
-
-		
-
-			// 8. Log S3 Export
-
-			var s3URL string
-
-			if logs != "" {
-
-				timestamp := time.Now().UTC().Format("2006/01/02/150405")
-
-				key := fmt.Sprintf("%s/%s/%s/crash.log", pod.Namespace, pod.Name, timestamp)
-
-				url, err := r.Storage.Upload(ctx, key, []byte(logs))
-
-				if err == nil && url != "" {
-
-					s3URL = url
-
-					r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ForensicExportSuccess", "Uploaded logs to %s", url)
-
-				}
-
-			}
-
-		
-
-			// 9. Config Cloning
-
-			resourceMap, _ := r.cloneDependencies(ctx, &pod)
-
-		
-
-			// 10. Log CM
-
-			logCMName, _ := r.createLogConfigMap(ctx, &pod, logs)
-
-			
-
-			logHash := sha256.Sum256([]byte(logs))
-
-			logHashStr := hex.EncodeToString(logHash[:])
-
-		
-
-			// 11. Snapshots
-
-			snapshotMap, _ := r.snapshotPVCs(ctx, &pod)
-
-		
-
-			// 12. Checkpoint Trigger & Collection (Refactored)
-
-			var checkpointLocation string
-
-			if r.Config.EnableCheckpointing && crashedContainerName != "" {
-
-				// A. Trigger
-
-				loc, err := r.CheckpointClient.TriggerCheckpoint(ctx, &pod, crashedContainerName)
-
-				if err != nil {
-
-					logger.Error(err, "Failed to trigger checkpoint")
-
-					r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ForensicCheckpointFailed", "Failed to trigger checkpoint: %v", err)
-
-				} else {
-
-					logger.Info("Checkpoint created on node", "path", loc)
-
-					checkpointLocation = loc
-
-					r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ForensicCheckpointCreated", "Container checkpoint created at %s", loc)
-
-		
-
-					// B. Collect (Exfiltrate) if S3 is configured
-
-					if r.Config.S3Bucket != "" {
-
-						s3Key := fmt.Sprintf("%s/%s/%s/checkpoint.tar", pod.Namespace, pod.Name, time.Now().UTC().Format("20060102-150405"))
-
-						
-
-						job := collector.BuildJob(collector.JobConfig{
-
-							Namespace:      r.Config.TargetNamespace,
-
-							NodeName:       pod.Spec.NodeName,
-
-							CheckpointPath: loc,
-
-							S3Bucket:       r.Config.S3Bucket,
-
-							S3Region:       r.Config.S3Region,
-
-							S3Key:          s3Key,
-
-							Image:          r.Config.Image, // Controller image
-
-							OwnerReference: metav1.OwnerReference{
-
-								APIVersion: "v1",
-
-								Kind:       "Pod",
-
-								Name:       pod.Name,
-
-								UID:        pod.UID,
-
-							},
-
-						})
-
-						
-
-						if err := r.Create(ctx, job); err != nil {
-
-							logger.Error(err, "Failed to launch collector job")
-
-						} else {
-
-							logger.Info("Launched collector job", "job", job.Name)
-
-							r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ForensicCollectorLaunched", "Launched job %s to upload checkpoint", job.Name)
-
-						}
-
-					}
-
-				}
-
-			}
-
-		
-
-			// 13. Create Forensic Pod
-
-			if err := r.createForensicPod(ctx, &pod, resourceMap, logCMName, signature, crashedContainerName, exitCode, logHashStr, snapshotMap, checkpointLocation, s3URL); err != nil {
-
-				return ctrl.Result{}, err
-
-			}
-
-		
+		if !allowed {
 
 			return ctrl.Result{}, nil
 
 		}
+
+	}
+
+	// 0.1 Check Ignore List
+
+	for _, ns := range r.Config.IgnoreNamespaces {
+
+		if req.Namespace == ns {
+
+			return ctrl.Result{}, nil
+
+		}
+
+	}
+
+	if req.Namespace == r.Config.TargetNamespace {
+
+		return ctrl.Result{}, nil
+
+	}
+
+	// 1. Fetch the Pod
+
+	var pod corev1.Pod
+
+	if err := r.Get(ctx, req.NamespacedName, &pod); err != nil {
+
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+
+	}
+
+	// 2. Ignore if deleted
+
+	if !pod.DeletionTimestamp.IsZero() {
+
+		return ctrl.Result{}, nil
+
+	}
+
+	// 3. Check Crash Criteria
+
+	isCrash := false
+
+	crashedContainerName := ""
+
+	var exitCode int32 = 0
+
+	checkStatus := func(name string, state corev1.ContainerState, lastState corev1.ContainerState) bool {
+
+		if state.Terminated != nil {
+
+			reason := state.Terminated.Reason
+
+			if reason == "Error" || reason == "OOMKilled" || state.Terminated.ExitCode != 0 {
+
+				crashedContainerName = name
+
+				exitCode = state.Terminated.ExitCode
+
+				return true
+
+			}
+
+		}
+
+		if lastState.Terminated != nil {
+
+			reason := lastState.Terminated.Reason
+
+			if reason == "Error" || reason == "OOMKilled" || lastState.Terminated.ExitCode != 0 {
+
+				crashedContainerName = name
+
+				exitCode = lastState.Terminated.ExitCode
+
+				return true
+
+			}
+
+		}
+
+		return false
+
+	}
+
+	allStatuses := append(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses...)
+
+	for _, status := range allStatuses {
+
+		if checkStatus(status.Name, status.State, status.LastTerminationState) {
+
+			isCrash = true
+
+			break
+
+		}
+
+	}
+
+	if !isCrash && pod.Status.Phase == corev1.PodFailed {
+
+		isCrash = true
+
+		if len(pod.Spec.Containers) > 0 {
+
+			crashedContainerName = pod.Spec.Containers[0].Name
+
+			exitCode = 1
+
+		}
+
+	}
+
+	if !isCrash {
+
+		return ctrl.Result{}, nil
+
+	}
+
+	logger.Info("Detected crashed pod", "pod", req.NamespacedName, "phase", pod.Status.Phase)
+
+	ForensicCrashesTotal.WithLabelValues(pod.Namespace, "CrashDetected").Inc()
+
+	// 4. Deduplication
+
+	signature := r.getCrashSignature(&pod, crashedContainerName, exitCode)
+
+	var forensicPods corev1.PodList
+
+	if err := r.List(ctx, &forensicPods, client.InNamespace(r.Config.TargetNamespace), client.MatchingLabels{LabelCrashSignature: signature}); err != nil {
+
+		return ctrl.Result{}, err
+
+	}
+
+	now := time.Now()
+
+	for _, fp := range forensicPods.Items {
+
+		age := now.Sub(fp.CreationTimestamp.Time)
+
+		if age < r.Config.RateLimitWindow {
+
+			logger.Info("Skipping forensic creation (rate limited)", "original_pod", req.NamespacedName)
+
+			return ctrl.Result{}, nil
+
+		}
+
+	}
+
+	r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ForensicAnalysisStarted", "Crash detected in container %s. Creating forensic pod.", crashedContainerName)
+
+	// ... (5, 6: Namespace & Network Policy) ...
+
+	if err := r.ensureNamespace(ctx); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureNetworkPolicy(ctx); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// 7. Logs
+
+	logs, _ := r.getPodLogs(ctx, &pod, crashedContainerName)
+
+	// 8. Log S3 Export
+
+	var s3URL string
+
+	if logs != "" {
+
+		timestamp := time.Now().UTC().Format("2006/01/02/150405")
+
+		key := fmt.Sprintf("%s/%s/%s/crash.log", pod.Namespace, pod.Name, timestamp)
+
+		url, err := r.Storage.Upload(ctx, key, []byte(logs))
+
+		if err == nil && url != "" {
+
+			s3URL = url
+
+			r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ForensicExportSuccess", "Uploaded logs to %s", url)
+
+		}
+
+	}
+
+	// 9. Config Cloning
+
+	resourceMap, _ := r.cloneDependencies(ctx, &pod)
+
+	// 10. Log CM
+
+	logCMName, _ := r.createLogConfigMap(ctx, &pod, logs)
+
+	logHash := sha256.Sum256([]byte(logs))
+
+	logHashStr := hex.EncodeToString(logHash[:])
+
+	// 11. Snapshots
+
+	snapshotMap, _ := r.snapshotPVCs(ctx, &pod)
+
+	// 12. Checkpoint Trigger & Collection (Refactored)
+
+	var checkpointLocation string
+
+	if r.Config.EnableCheckpointing && crashedContainerName != "" {
+
+		// A. Trigger
+
+		loc, err := r.CheckpointClient.TriggerCheckpoint(ctx, &pod, crashedContainerName)
+
+		if err != nil {
+
+			logger.Error(err, "Failed to trigger checkpoint")
+
+			r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ForensicCheckpointFailed", "Failed to trigger checkpoint: %v", err)
+
+		} else {
+
+			logger.Info("Checkpoint created on node", "path", loc)
+
+			checkpointLocation = loc
+
+			r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ForensicCheckpointCreated", "Container checkpoint created at %s", loc)
+
+			// B. Collect (Exfiltrate) if S3 is configured
+
+			if r.Config.S3Bucket != "" {
+
+				s3Key := fmt.Sprintf("%s/%s/%s/checkpoint.tar", pod.Namespace, pod.Name, time.Now().UTC().Format("20060102-150405"))
+
+				job := collector.BuildJob(collector.JobConfig{
+
+					Namespace: r.Config.TargetNamespace,
+
+					NodeName: pod.Spec.NodeName,
+
+					CheckpointPath: loc,
+
+					S3Bucket: r.Config.S3Bucket,
+
+					S3Region: r.Config.S3Region,
+
+					S3Key: s3Key,
+
+					Image: r.Config.Image, // Controller image
+
+					OwnerReference: metav1.OwnerReference{
+
+						APIVersion: "v1",
+
+						Kind: "Pod",
+
+						Name: pod.Name,
+
+						UID: pod.UID,
+					},
+				})
+
+				if err := r.Create(ctx, job); err != nil {
+
+					logger.Error(err, "Failed to launch collector job")
+
+				} else {
+
+					logger.Info("Launched collector job", "job", job.Name)
+
+					r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ForensicCollectorLaunched", "Launched job %s to upload checkpoint", job.Name)
+
+				}
+
+			}
+
+		}
+
+	}
+
+	// 13. Create Forensic Pod
+
+	if err := r.createForensicPod(ctx, &pod, resourceMap, logCMName, signature, crashedContainerName, exitCode, logHashStr, snapshotMap, checkpointLocation, s3URL); err != nil {
+
+		return ctrl.Result{}, err
+
+	}
+
+	return ctrl.Result{}, nil
+
+}
 
 func (r *PodReconciler) triggerCheckpoint(ctx context.Context, pod *corev1.Pod, containerName string) (string, error) {
 	nodeName := pod.Spec.NodeName

@@ -1,8 +1,6 @@
 package collector
 
 import (
-	"fmt"
-
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -10,24 +8,24 @@ import (
 
 // JobConfig holds configuration for the Collector Job
 type JobConfig struct {
-	Namespace       string
-	NodeName        string
-	CheckpointPath  string
-	S3Bucket        string
-	S3Region        string
-	S3Key           string
-	Image           string
-	OwnerReference  metav1.OwnerReference
+	Namespace      string
+	NodeName       string
+	CheckpointPath string
+	S3Bucket       string
+	S3Region       string
+	S3Key          string
+	Image          string
+	OwnerReference metav1.OwnerReference
 }
 
 // BuildJob constructs the Collector Job
 func BuildJob(cfg JobConfig) *batchv1.Job {
 	hostPathType := corev1.HostPathFile
-	
+
 	// We run as root to read the checkpoint file owned by root on the node
 	// This requires privileged PSP/PSA or explicit security context
 	rootUser := int64(0)
-	
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "forensic-collector-",
@@ -57,7 +55,7 @@ func BuildJob(cfg JobConfig) *batchv1.Job {
 								"--s3-key=" + cfg.S3Key,
 							},
 							SecurityContext: &corev1.SecurityContext{
-								RunAsUser: &rootUser, // Checkpoints are usually root:root
+								RunAsUser:  &rootUser,                              // Checkpoints are usually root:root
 								Privileged: func(b bool) *bool { return &b }(true), // Likely needed for hostPath read
 							},
 							VolumeMounts: []corev1.VolumeMount{
