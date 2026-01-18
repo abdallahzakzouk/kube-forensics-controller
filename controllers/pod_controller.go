@@ -592,6 +592,13 @@ func (r *PodReconciler) cloneDependencies(ctx context.Context, pod *corev1.Pod) 
 		return nil, err
 	}
 
+	// 3. Scan ImagePullSecrets
+	for _, s := range pod.Spec.ImagePullSecrets {
+		if err := handleSecret(s.Name); err != nil {
+			return nil, err
+		}
+	}
+
 	return resourceMap, nil
 }
 
@@ -677,7 +684,8 @@ func (r *PodReconciler) createForensicPod(ctx context.Context, originalPod *core
 	// This prevents the forensic pod from using the source SA to attack the API
 	falseVal := false
 	newPod.Spec.AutomountServiceAccountToken = &falseVal
-	newPod.Spec.ServiceAccountName = "" // Or keep empty to use default (which won't have token mounted)
+	newPod.Spec.ServiceAccountName = "default"
+	newPod.Spec.DeprecatedServiceAccount = "default"
 
 	// Feature 1: Mount Log ConfigMap
 	logVolName := "forensic-logs"
@@ -746,6 +754,13 @@ func (r *PodReconciler) createForensicPod(ctx context.Context, originalPod *core
 					}
 				}
 			}
+		}
+	}
+
+	// 1.1 ImagePullSecrets
+	for i, ips := range newPod.Spec.ImagePullSecrets {
+		if newName, ok := resourceMap[fmt.Sprintf("secret/%s", ips.Name)]; ok {
+			newPod.Spec.ImagePullSecrets[i].Name = newName
 		}
 	}
 
