@@ -56,6 +56,17 @@ If an S3 Bucket is configured, the controller automatically:
 4.  Uploads both the artifact (`checkpoint.tar`) and the hash (`.sha256`) to S3.
 5.  Cleans up the file from the node to prevent disk exhaustion.
 
+**Next Steps (Roadmap):** Automated exfiltration of the `.tar` file to S3 via an ephemeral retriever pod.
+
+### On-Demand Trigger (Live Forensics)
+Since you cannot checkpoint a crashed (dead) process, this feature is primarily for **Live Forensics** (e.g., investigating a hanging or compromised pod).
+
+**Usage:**
+```bash
+kubectl annotate pod my-suspicious-pod forensic.io/request-checkpoint=true
+```
+The controller will detect the annotation, trigger the checkpoint, exfiltrate it to S3 (if configured), and then remove the annotation.
+
 ## 5. S3 Log Export
 The controller can automatically upload captured logs to S3.
 *   **Path:** `s3://<bucket>/<namespace>/<pod>/<timestamp>/crash.log`
@@ -71,4 +82,9 @@ The controller exposes Prometheus-format metrics on port `8080` at `/metrics`.
 | `forensics_pod_creation_errors_total` | Counter | Number of errors during creation workflow. | `source_namespace`, `step` |
 
 **Datadog Users:** These metrics are compatible with the Datadog OpenMetrics integration.
+
+## 7. Universal Toolkit Injection
+The controller injects a **Forensic Toolkit** into every cloned pod at `/usr/local/bin/toolkit`.
+*   **Content:** A statically linked (`musl`) `busybox` binary providing `sh`, `ls`, `cat`, `nc`, `curl`, etc.
+*   **Compatibility:** Works on **distroless** images, Alpine, Debian, and RedHat variants without dependency errors (`glibc` independent).
 
