@@ -710,7 +710,7 @@ func (r *PodReconciler) createForensicPod(ctx context.Context, originalPod *core
 	// Feature 2: Init Container
 	initContainer := corev1.Container{
 		Name:    "install-toolkit",
-		Image:   "busybox:1.36",
+		Image:   "busybox:1.36-musl", // Use musl/static build to ensure compatibility across distros
 		Command: []string{"/bin/sh", "-c", "cp /bin/sh /bin/ls /bin/cat /tools/"},
 		VolumeMounts: []corev1.VolumeMount{
 			{
