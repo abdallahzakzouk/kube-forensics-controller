@@ -56,8 +56,6 @@ If an S3 Bucket is configured, the controller automatically:
 4.  Uploads both the artifact (`checkpoint.tar`) and the hash (`.sha256`) to S3.
 5.  Cleans up the file from the node to prevent disk exhaustion.
 
-**Next Steps (Roadmap):** Automated exfiltration of the `.tar` file to S3 via an ephemeral retriever pod.
-
 ### On-Demand Trigger (Live Forensics)
 Since you cannot checkpoint a crashed (dead) process, this feature is primarily for **Live Forensics** (e.g., investigating a hanging or compromised pod).
 
