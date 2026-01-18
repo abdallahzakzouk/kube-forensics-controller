@@ -42,149 +42,236 @@ const (
 
 	LabelForensicTTL = "forensic.io/ttl"
 
-	LabelCrashSignature = "forensic.io/crash-signature"
-
+	LabelCrashSignature     = "forensic.io/crash-signature"
 	AnnotationNoSecretClone = "forensic.io/no-secret-clone"
-
-	AnnotationForensicHold = "forensic.io/hold"
-
-	LabelLogS3URL = "forensic.io/log-s3-url"
-
-	ForensicTimeFormat = "2006-01-02T15-04-05Z"
-
-	NetworkPolicyName = "deny-all-egress"
-
-	LogConfigMapKey = "crash.log"
+	AnnotationForensicHold  = "forensic.io/hold"
+	AnnotationRequestCheckpoint = "forensic.io/request-checkpoint"
+	LabelLogS3URL           = "forensic.io/log-s3-url"
+	ForensicTimeFormat      = "2006-01-02T15-04-05Z"
 )
 
-type ForensicsConfig struct {
-	TargetNamespace string
-
-	ForensicTTL time.Duration
-
-	MaxLogSizeBytes int64
-
-	IgnoreNamespaces []string
-
-	WatchNamespaces []string
-
-	EnableSecretCloning bool
-
-	EnableCheckpointing bool
-
-	RateLimitWindow time.Duration
-
-	S3Bucket string
-
-	S3Region string
-
-	Image string // Controller image for collector job
-
-}
-
-// PodReconciler reconciles a Pod object
-
-type PodReconciler struct {
-	client.Client
-
-	Scheme *runtime.Scheme
-
-	KubeClient kubernetes.Interface
-
-	Config ForensicsConfig
-
-	Recorder record.EventRecorder
-
-	Storage storage.Provider
-
-	CheckpointClient *checkpoint.Client
-}
-
-//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
-
-//+kubebuilder:rbac:groups="",resources=pods/status,verbs=get;update;patch
-
-//+kubebuilder:rbac:groups="",resources=pods/log,verbs=get
-
-//+kubebuilder:rbac:groups="",resources=configmaps;secrets,verbs=get;list;watch;create;update;patch;delete
-
-//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
-
-//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
-
-//+kubebuilder:rbac:groups="",resources=nodes/proxy,verbs=get;create
-
-//+kubebuilder:rbac:groups="batch",resources=jobs,verbs=get;list;watch;create;delete
+// ...
 
 func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-
 	logger := log.FromContext(ctx)
 
-	// ... (Existing Checks 0, 0.1, 1, 2, 3) ...
-
+	// ... (Checks 0, 0.1) ...
 	// 0. Check Watch Namespaces (Allow-list)
-
 	if len(r.Config.WatchNamespaces) > 0 {
-
 		allowed := false
-
 		for _, ns := range r.Config.WatchNamespaces {
-
 			if req.Namespace == ns {
-
 				allowed = true
-
 				break
-
 			}
-
 		}
-
 		if !allowed {
-
 			return ctrl.Result{}, nil
-
 		}
-
 	}
 
 	// 0.1 Check Ignore List
-
 	for _, ns := range r.Config.IgnoreNamespaces {
-
 		if req.Namespace == ns {
-
 			return ctrl.Result{}, nil
-
 		}
-
 	}
-
 	if req.Namespace == r.Config.TargetNamespace {
-
 		return ctrl.Result{}, nil
-
 	}
 
 	// 1. Fetch the Pod
-
 	var pod corev1.Pod
-
 	if err := r.Get(ctx, req.NamespacedName, &pod); err != nil {
-
 		return ctrl.Result{}, client.IgnoreNotFound(err)
-
 	}
 
 	// 2. Ignore if deleted
-
 	if !pod.DeletionTimestamp.IsZero() {
-
 		return ctrl.Result{}, nil
-
 	}
 
+	// === FEATURE: On-Demand Checkpoint ===
+	if pod.Annotations[AnnotationRequestCheckpoint] == "true" {
+		logger.Info("Detected checkpoint request annotation", "pod", req.NamespacedName)
+		
+		// Find first running container
+		var targetContainer string
+		for _, status := range pod.Status.ContainerStatuses {
+			if status.State.Running != nil {
+				targetContainer = status.Name
+				break
+			}
+		}
+		
+		if targetContainer == "" {
+			logger.Info("No running container found for checkpoint request", "pod", req.NamespacedName)
+			// Remove annotation to stop retry loop? Or keep it? 
+			// Better to remove it to avoid infinite reconciliation if the pod is broken.
+		} else {
+			// Trigger Checkpoint
+			if r.Config.EnableCheckpointing {
+				loc, err := r.triggerCheckpoint(ctx, &pod, targetContainer)
+				if err != nil {
+					logger.Error(err, "Failed to trigger on-demand checkpoint")
+					r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ForensicCheckpointFailed", "Failed to trigger on-demand checkpoint: %v", err)
+				} else {
+					logger.Info("On-demand checkpoint created", "location", loc)
+					r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ForensicCheckpointCreated", "On-demand checkpoint created at %s", loc)
+					
+					// Launch Collector
+					if r.Config.S3Bucket != "" {
+						r.launchCollector(ctx, &pod, loc)
+					}
+				}
+			} else {
+				r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ForensicCheckpointIgnored", "Checkpointing is disabled in controller config")
+			}
+		}
+
+		// Remove Annotation to prevent loop
+		patch := client.MergeFrom(pod.DeepCopy())
+		delete(pod.Annotations, AnnotationRequestCheckpoint)
+		if err := r.Patch(ctx, &pod, patch); err != nil {
+			logger.Error(err, "Failed to remove checkpoint annotation")
+			return ctrl.Result{}, err
+		}
+		
+		// Return here? Or continue to check for crashes? 
+		// A pod can be running AND requesting checkpoint. It shouldn't trigger "Crash" logic.
+		return ctrl.Result{}, nil
+	}
+
+	// === FEATURE: Crash Forensics ===
+
 	// 3. Check Crash Criteria
+	isCrash := false
+	crashedContainerName := ""
+	var exitCode int32 = 0
+	
+	// ... (Rest of Crash Logic) ...
+	checkStatus := func(name string, state corev1.ContainerState, lastState corev1.ContainerState) bool {
+		if state.Terminated != nil {
+			reason := state.Terminated.Reason
+			if reason == "Error" || reason == "OOMKilled" || state.Terminated.ExitCode != 0 {
+				crashedContainerName = name
+				exitCode = state.Terminated.ExitCode
+				return true
+			}
+		}
+		if lastState.Terminated != nil {
+			reason := lastState.Terminated.Reason
+			if reason == "Error" || reason == "OOMKilled" || lastState.Terminated.ExitCode != 0 {
+				crashedContainerName = name
+				exitCode = lastState.Terminated.ExitCode
+				return true
+			}
+		}
+		return false
+	}
+
+	allStatuses := append(pod.Status.ContainerStatuses, pod.Status.InitContainerStatuses...)
+	for _, status := range allStatuses {
+		if checkStatus(status.Name, status.State, status.LastTerminationState) {
+			isCrash = true
+			break
+		}
+	}
+	
+	if !isCrash && pod.Status.Phase == corev1.PodFailed {
+		isCrash = true
+		if len(pod.Spec.Containers) > 0 {
+			crashedContainerName = pod.Spec.Containers[0].Name
+			exitCode = 1
+		}
+	}
+
+	if !isCrash {
+		return ctrl.Result{}, nil
+	}
+
+	logger.Info("Detected crashed pod", "pod", req.NamespacedName, "phase", pod.Status.Phase)
+	ForensicCrashesTotal.WithLabelValues(pod.Namespace, "CrashDetected").Inc()
+
+	// 4. Deduplication
+	signature := r.getCrashSignature(&pod, crashedContainerName, exitCode)
+	var forensicPods corev1.PodList
+	if err := r.List(ctx, &forensicPods, client.InNamespace(r.Config.TargetNamespace), client.MatchingLabels{LabelCrashSignature: signature} ); err != nil {
+		return ctrl.Result{}, err
+	}
+	now := time.Now()
+	for _, fp := range forensicPods.Items {
+		age := now.Sub(fp.CreationTimestamp.Time)
+		if age < r.Config.RateLimitWindow {
+			logger.Info("Skipping forensic creation (rate limited)", "original_pod", req.NamespacedName)
+			return ctrl.Result{}, nil
+		}
+	}
+
+	r.Recorder.Eventf(&pod, corev1.EventTypeWarning, "ForensicAnalysisStarted", "Crash detected in container %s (ExitCode: %d). Creating forensic pod.", crashedContainerName, exitCode)
+
+	// ... (5, 6, 7, 8, 9, 10, 11) ...
+	if err := r.ensureNamespace(ctx); err != nil { return ctrl.Result{}, err } 
+	if err := r.ensureNetworkPolicy(ctx); err != nil { return ctrl.Result{}, err }
+	logs, _ := r.getPodLogs(ctx, &pod, crashedContainerName)
+	
+	var s3URL string
+	if logs != "" {
+		timestamp := time.Now().UTC().Format("2006/01/02/150405")
+		key := fmt.Sprintf("%s/%s/%s/crash.log", pod.Namespace, pod.Name, timestamp)
+		url, err := r.Storage.Upload(ctx, key, []byte(logs))
+		if err == nil && url != "" {
+			s3URL = url
+			r.Recorder.Eventf(&pod, corev1.EventTypeNormal, "ForensicExportSuccess", "Uploaded logs to %s", url)
+		}
+	}
+
+	resourceMap, _ := r.cloneDependencies(ctx, &pod)
+	logCMName, _ := r.createLogConfigMap(ctx, &pod, logs)
+	logHash := sha256.Sum256([]byte(logs))
+	logHashStr := hex.EncodeToString(logHash[:])
+	snapshotMap, _ := r.snapshotPVCs(ctx, &pod)
+
+	// 12. Trigger Container Checkpoint (SKIPPED FOR CRASHES)
+	// We deliberately skip automated checkpointing for crashed pods because the process is dead.
+	var checkpointLocation string
+	// Logic removed: if r.Config.EnableCheckpointing ...
+
+	// 13. Create Forensic Pod
+	if err := r.createForensicPod(ctx, &pod, resourceMap, logCMName, signature, crashedContainerName, exitCode, logHashStr, snapshotMap, checkpointLocation, s3URL); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *PodReconciler) launchCollector(ctx context.Context, pod *corev1.Pod, checkpointPath string) {
+	s3Key := fmt.Sprintf("%s/%s/%s/checkpoint.tar", pod.Namespace, pod.Name, time.Now().UTC().Format("20060102-150405"))
+	
+	job := collector.BuildJob(collector.JobConfig{
+		Namespace:      r.Config.TargetNamespace,
+		NodeName:       pod.Spec.NodeName,
+		CheckpointPath: checkpointPath,
+		S3Bucket:       r.Config.S3Bucket,
+		S3Region:       r.Config.S3Region,
+		S3Key:          s3Key,
+		Image:          r.Config.Image,
+		OwnerReference: metav1.OwnerReference{
+			APIVersion: "v1",
+			Kind:       "Pod",
+			Name:       pod.Name,
+			UID:        pod.UID,
+		},
+	})
+	
+	logger := log.FromContext(ctx)
+	if err := r.Create(ctx, job); err != nil {
+		logger.Error(err, "Failed to launch collector job")
+	} else {
+		logger.Info("Launched collector job", "job", job.Name)
+		r.Recorder.Eventf(pod, corev1.EventTypeNormal, "ForensicCollectorLaunched", "Launched job %s to upload checkpoint", job.Name)
+	}
+}
 
 	isCrash := false
 
